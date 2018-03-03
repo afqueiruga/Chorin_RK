@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Generalizing Chorin's Method for Higher-Order Runge Kutta methods"
+title: "Generalizing Chorin's Method for Higher-Order Runge Kuttas"
 date: 2018-3-1
 categories: simulation
 ---
@@ -16,9 +16,10 @@ It's good enough for solving Navier Stokes efficiently, but what if we are tryin
 How do we rephrase the method as a general Runge Kutta?
 
 ## Formulation
+
 The partial differential algebraic equation for Navier Stokes is
 \begin{equation}
-\partial_t u + \nabla u \cdot u - \mu \nabla^2 u + \nabla p = f
+\partial_t u + \nabla u \cdot u - \mathrm{Re}^{-1} \nabla^2 u + \nabla p = f
 \end{equation}
 subject to the constraint
 \begin{equation}
@@ -38,8 +39,8 @@ This lets us rewrite the ODE as
 which is still subject to the same constraint as before.
 We're allowed to take the time derivative of the constraint, and exchanging with the spatial divergence gives us a new equation,
 \begin{equation}
-\partial _t \nabla \cdot u = 0 \, \rightarrow \, 
-\nabla \cdot \partial _t u = 0 \, \rightarrow \, 
+\partial _t \nabla \cdot u = 0 \quad \rightarrow \quad
+\nabla \cdot \partial _t u = 0 \quad \rightarrow \quad
 \nabla \cdot (r-\nabla p) = 0
 \end{equation}
 We can use this equation to solve for $p$ initially for $r$, and then apply our time integrator to $\partial _t u$.
@@ -56,52 +57,49 @@ How do we phrase this as an explicit integrator?
 \end{equation}
 2. Solve for $p(t+h)$ using $r$:
 \begin{equation}
-(\nabla \delta p, \nabla p) = (\delta p, \nabla\cdot r)
+(\nabla \delta p, \nabla p) = (\delta p, -\nabla\cdot r)
 \end{equation}
 3. Apply the time stepper to the ODE:
 \begin{equation}
 (\delta u, \partial_t u) = (\delta u, r) - (\delta u, \nabla p)
 \end{equation}
-which comes out to the discrete system:
+which comes out to the discrete system that can integrated normally:
 \begin{equation}
 \mathbf{M} \dot{\mathbf{u}} = \mathbf{R}(t)
 \end{equation}
-
 
 The process is phrased as a projection step as an optimization; it would be possible to skip 1 and have steps 2 and 3 reperform the calculations inside of two different element assembly routines.
 However, the force coupling term $(\delta u,f)$ may be a very complicated interaction between two different numerical methods that we do not want to repeat.
 For example, as I'm writing this I'm implementing a particle-fluid code where that term is a discrete summation of point-integrals using my [FEniCS_Particles](https://github.com/afqueiruga/FEniCS_Particles) library.
 
-
-## Implementation in FEniCS using afqsrungekutta
+## Implementation in FEniCS
 
 We use the standard Taylor-Hood elements (quadratic velocities and linear pressures).
 The forms needed to perform the above steps look as follows in the FEniCS UFL:
 ```Python
 f_v_M = inner(tu,Du)*dx
 f_r_proj = - inner(tu,dot(grad(u),u))*dx \
-           - mu*inner(grad(tu),grad(u))*dx
+       - mu*inner(grad(tu),grad(u))*dx
 f_p_M = inner(tp,Dp)*dx
-f_p_r = inner(tp,div(r))*dx
+f_p_r = inner(tp,-div(r))*dx
 f_v_dot = inner(tu, r - grad(p))*dx
 ```
-This projection step isn't very standard, so we have to implement a new class.
+This projection step requires us to implement a new class. We merge
+the step into the implicit pressure 
 ```Python
 class RK_field_chorin_pressure(pyrk.RKbase.RK_field_dolfin):
-    def __init__(self, r, p, f_v_M, f_r_proj, f_p_K, f_p_R, bcs=None, **kwargs):
-        self.r = r
-        self.p = p
-        self.f_r_proj = f_r_proj
-        self.f_p_R = f_p_R
-        self.bcs = bcs
-        self.K_p = assemble(f_p_K)
-        self.M_v = assemble(f_v_M)
-        pyrk.RKbase.RK_field_dolfin.__init__(self, 0, [p.vector()], None, **kwargs)
-        
-    def sys(self,time,tang=False):
-        solve(self.M_v, self.r.vector(), assemble(self.f_r_proj))
-        R = assemble(self.f_p_R) + self.K_p*self.p.vector()
-        return [R, self.K_p] if tang else R
+def __init__(self, r, p, f_v_M, f_r_proj, f_p_K, f_p_R, bcs=None, **kwargs):
+    self.r, self.p = r, p
+    self.f_r_proj = f_r_proj
+    self.f_p_R = f_p_R
+    self.bcs = bcs
+    self.K_p = assemble(f_p_K)
+    self.M_v = assemble(f_v_M)
+    pyrk.RKbase.RK_field_dolfin.__init__(self, 0, [p.vector()], None, **kwargs)
+def sys(self,time,tang=False):
+    solve(self.M_v, self.r.vector(), assemble(self.f_r_proj))
+    R = -assemble(self.f_p_R) + self.K_p*self.p.vector()
+    return [R, self.K_p] if tang else R
 ```
 The big addition to this class from the standard `RK_field_fenics` class is that it performs the $r$ projection step at the first line of `sys()` before return $\mathbf{R}$ and $\mathbf{K}$.
 

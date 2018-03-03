@@ -20,15 +20,7 @@ left.mark(boundfunc,3)
 right = CompiledSubDomain("x[0]>L/2.0-eps && on_boundary",h=h,L=L,eps=1.0e-12)
 right.mark(boundfunc,4)
 
-
 # Select dimension-dependent aspects
-cell = mesh.ufl_cell()
-gdim = mesh.geometry().dim()
-if gdim == 2:
-    zeroV = Constant((0.,0.))
-else:
-    zeroV = Constant((0.,0.,0.))
-
 V2 = VectorFunctionSpace(mesh, "CG",2)
 S1 = FunctionSpace(mesh, 'CG',1)
 u = Function(V2)
@@ -63,24 +55,18 @@ f_v_dot = inner(tu, r - grad(p))*dx
 
 
 class RK_field_chorin_pressure(pyrk.RKbase.RK_field_dolfin):
-    """
-    Just give this class FEniCS forms!
-    """
     def __init__(self, r, p, f_v_M, f_r_proj, f_p_K, f_p_R, bcs=None, **kwargs):
-        self.r = r
-        self.p = p
+        self.r self.p = r, p
         self.f_r_proj = f_r_proj
         self.f_p_R = f_p_R
         self.bcs = bcs
         self.K_p = assemble(f_p_K)
         self.M_v = assemble(f_v_M)
         pyrk.RKbase.RK_field_dolfin.__init__(self, 0, [p.vector()], None, **kwargs)
-        
     def sys(self,time,tang=False):
         solve(self.M_v, self.r.vector(), assemble(self.f_r_proj))
         R = assemble(self.f_p_R) + self.K_p*self.p.vector()
         return [R, self.K_p] if tang else R
-    
     def bcapp(self,K,R,t,hold=False):
         if self.bcs is not None:
             for bc in self.bcs:
