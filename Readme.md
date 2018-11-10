@@ -5,6 +5,8 @@ date: 2018-3-1
 categories: simulation
 ---
 
+## NOTE: This code hasn't passed benchmarking yet. Don't trust it!
+
 ## Overview
 
 Chorin's method is one of the standard ways of solving incompressible Navier Stokes.
